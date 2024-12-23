@@ -127,10 +127,24 @@ impl GitRepository {
 fn glob_to_regex(pattern: &str) -> String {
     let mut regex = String::new();
     regex.push('^');
-
-    for c in pattern.chars() {
+    
+    let mut chars = pattern.chars().peekable();
+    while let Some(c) = chars.next() {
         match c {
-            '*' => regex.push_str(".*"),
+            '*' => {
+                if chars.peek() == Some(&'*') {
+                    chars.next();  // 2つ目の'*'を消費
+                    // **の後のスラッシュをチェック
+                    if chars.peek() == Some(&'/') {
+                        chars.next();  // '/'を消費
+                        regex.push_str(".*/");  // ディレクトリをまたぐマッチング
+                    } else {
+                        regex.push_str(".*");  // スラッシュがない場合は単純に.*
+                    }
+                } else {
+                    regex.push_str("[^/]*");  // 単一の*は現在のディレクトリ内のみマッチ
+                }
+            },
             '?' => regex.push('.'),
             '.' => regex.push_str("\\."),
             '/' => regex.push('/'),
@@ -138,7 +152,7 @@ fn glob_to_regex(pattern: &str) -> String {
             _ => regex.push_str(&regex::escape(&c.to_string())),
         }
     }
-
+    
     regex.push('$');
     regex
 }
@@ -149,11 +163,28 @@ mod tests {
 
     #[test]
     fn test_glob_to_regex() {
-        assert_eq!(glob_to_regex("*.py"), "^.*\\.py$");
-        assert_eq!(glob_to_regex("src/*.rs"), "^src/.*\\.rs$");
-        assert_eq!(glob_to_regex("**/*.js"), "^.*/.*\\.js$");
-    }
+        let test_cases = [
+            ("*.py", "^[^/]*\\.py$"),
+            ("src/*.rs", "^src/[^/]*\\.rs$"),
+            ("**/*.js", "^.*/[^/]*\\.js$"),
+            ("src/**/*.ts", "^src/.*/[^/]*\\.ts$"),
+            ("doc/*.md", "^doc/[^/]*\\.md$"),
+            ("test/**", "^test/.*$"),
+            ("**.txt", "^.*\\.txt$"),
+        ];
 
+        for (input, expected) in test_cases {
+            let result = glob_to_regex(input);
+            assert_eq!(
+                result, 
+                expected, 
+                "Pattern '{}' should convert to '{}', but got '{}'", 
+                input, 
+                expected,
+                result
+            );
+        }
+    }
     #[test]
     fn test_should_include_file() {
         let repo = Repository::open(".").unwrap();
