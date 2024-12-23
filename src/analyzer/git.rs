@@ -127,24 +127,24 @@ impl GitRepository {
 fn glob_to_regex(pattern: &str) -> String {
     let mut regex = String::new();
     regex.push('^');
-    
+
     let mut chars = pattern.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
             '*' => {
                 if chars.peek() == Some(&'*') {
-                    chars.next();  // 2つ目の'*'を消費
-                    // **の後のスラッシュをチェック
+                    chars.next(); // 2つ目の'*'を消費
+                                  // **の後のスラッシュをチェック
                     if chars.peek() == Some(&'/') {
-                        chars.next();  // '/'を消費
-                        regex.push_str(".*/");  // ディレクトリをまたぐマッチング
+                        chars.next(); // '/'を消費
+                        regex.push_str(".*/"); // ディレクトリをまたぐマッチング
                     } else {
-                        regex.push_str(".*");  // スラッシュがない場合は単純に.*
+                        regex.push_str(".*"); // スラッシュがない場合は単純に.*
                     }
                 } else {
-                    regex.push_str("[^/]*");  // 単一の*は現在のディレクトリ内のみマッチ
+                    regex.push_str("[^/]*"); // 単一の*は現在のディレクトリ内のみマッチ
                 }
-            },
+            }
             '?' => regex.push('.'),
             '.' => regex.push_str("\\."),
             '/' => regex.push('/'),
@@ -152,7 +152,7 @@ fn glob_to_regex(pattern: &str) -> String {
             _ => regex.push_str(&regex::escape(&c.to_string())),
         }
     }
-    
+
     regex.push('$');
     regex
 }
@@ -176,12 +176,9 @@ mod tests {
         for (input, expected) in test_cases {
             let result = glob_to_regex(input);
             assert_eq!(
-                result, 
-                expected, 
-                "Pattern '{}' should convert to '{}', but got '{}'", 
-                input, 
-                expected,
-                result
+                result, expected,
+                "Pattern '{}' should convert to '{}', but got '{}'",
+                input, expected, result
             );
         }
     }
