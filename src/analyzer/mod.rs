@@ -37,9 +37,7 @@ impl HotspotAnalyzer {
         for commit in commits {
             let author = commit.author.clone();
             for file_path in commit.files {
-                let stats = file_stats
-                    .entry(file_path)
-                    .or_insert_with(FileStats::default);
+                let stats = file_stats.entry(file_path).or_default();
 
                 stats.revisions += 1;
                 stats.authors.insert(author.clone());

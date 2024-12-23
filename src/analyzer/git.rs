@@ -133,7 +133,7 @@ fn glob_to_regex(pattern: &str) -> String {
             '*' => regex.push_str(".*"),
             '?' => regex.push('.'),
             '.' => regex.push_str("\\."),
-            '/' => regex.push_str("/"),
+            '/' => regex.push('/'),
             c if c.is_alphanumeric() => regex.push(c),
             _ => regex.push_str(&regex::escape(&c.to_string())),
         }
