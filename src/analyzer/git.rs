@@ -1,8 +1,8 @@
 use super::error::AnalyzerError;
 use chrono::{DateTime, Utc};
-use git2::{Repository, Commit};
-use std::path::Path;
+use git2::{Commit, Repository};
 use regex::Regex;
+use std::path::Path;
 
 pub struct GitRepository {
     repo: Repository,
@@ -25,20 +25,20 @@ impl GitRepository {
         include_merge_commits: bool,
     ) -> Result<Self, AnalyzerError> {
         let repo = Repository::open(path)?;
-        
+
         let include_patterns = include_patterns
             .into_iter()
             .map(|p| Regex::new(&glob_to_regex(&p)))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| AnalyzerError::InvalidPattern(e.to_string()))?;
-            
+
         let exclude_patterns = exclude_patterns
             .into_iter()
             .map(|p| Regex::new(&glob_to_regex(&p)))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| AnalyzerError::InvalidPattern(e.to_string()))?;
 
-        Ok(Self { 
+        Ok(Self {
             repo,
             include_patterns,
             exclude_patterns,
@@ -47,7 +47,11 @@ impl GitRepository {
     }
 
     fn should_include_file(&self, file_path: &str) -> bool {
-        if self.exclude_patterns.iter().any(|pattern| pattern.is_match(file_path)) {
+        if self
+            .exclude_patterns
+            .iter()
+            .any(|pattern| pattern.is_match(file_path))
+        {
             return false;
         }
 
@@ -55,21 +59,26 @@ impl GitRepository {
             return true;
         }
 
-        self.include_patterns.iter().any(|pattern| pattern.is_match(file_path))
+        self.include_patterns
+            .iter()
+            .any(|pattern| pattern.is_match(file_path))
     }
 
-    pub fn get_commits_since(&self, since: DateTime<Utc>) -> Result<Vec<CommitInfo>, AnalyzerError> {
+    pub fn get_commits_since(
+        &self,
+        since: DateTime<Utc>,
+    ) -> Result<Vec<CommitInfo>, AnalyzerError> {
         let mut revwalk = self.repo.revwalk()?;
         revwalk.push_head()?;
         revwalk.set_sorting(git2::Sort::TIME)?;
-        
+
         let since_timestamp = since.timestamp();
-        
+
         let mut commits = Vec::new();
         for oid in revwalk {
             let oid = oid?;
             let commit = self.repo.find_commit(oid)?;
-            
+
             if commit.time().seconds() < since_timestamp {
                 continue;
             }
@@ -78,40 +87,29 @@ impl GitRepository {
                 continue;
             }
 
-            let author = commit
-                .author()
-                .name()
-                .unwrap_or("unknown")
-                .to_string();
+            let author = commit.author().name().unwrap_or("unknown").to_string();
 
-            let files: Vec<String> = self.get_changed_files(&commit)?
+            let files: Vec<String> = self
+                .get_changed_files(&commit)?
                 .into_iter()
                 .filter(|file_path| self.should_include_file(file_path))
                 .collect();
-            
+
             if !files.is_empty() {
-                commits.push(CommitInfo {
-                    author,
-                    files,
-                });
+                commits.push(CommitInfo { author, files });
             }
         }
-        
+
         Ok(commits)
     }
 
     fn get_changed_files(&self, commit: &Commit) -> Result<Vec<String>, AnalyzerError> {
         let tree = commit.tree()?;
-        let parent_tree = commit
-            .parent(0)
-            .ok()
-            .and_then(|parent| parent.tree().ok());
+        let parent_tree = commit.parent(0).ok().and_then(|parent| parent.tree().ok());
 
-        let diff = self.repo.diff_tree_to_tree(
-            parent_tree.as_ref(),
-            Some(&tree),
-            None,
-        )?;
+        let diff = self
+            .repo
+            .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
 
         let mut files = Vec::new();
         for delta in diff.deltas() {
@@ -129,7 +127,7 @@ impl GitRepository {
 fn glob_to_regex(pattern: &str) -> String {
     let mut regex = String::new();
     regex.push('^');
-    
+
     for c in pattern.chars() {
         match c {
             '*' => regex.push_str(".*"),
@@ -140,7 +138,7 @@ fn glob_to_regex(pattern: &str) -> String {
             _ => regex.push_str(&regex::escape(&c.to_string())),
         }
     }
-    
+
     regex.push('$');
     regex
 }
@@ -165,9 +163,7 @@ mod tests {
                 Regex::new("^.*\\.rs$").unwrap(),
                 Regex::new("^src/.*\\.toml$").unwrap(),
             ],
-            exclude_patterns: vec![
-                Regex::new("^target/.*$").unwrap(),
-            ],
+            exclude_patterns: vec![Regex::new("^target/.*$").unwrap()],
             include_merge_commits: false,
         };
 

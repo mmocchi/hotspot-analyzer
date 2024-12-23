@@ -5,31 +5,31 @@ use std::path::PathBuf;
 
 /// デフォルトのインクルードパターン
 const DEFAULT_INCLUDE_PATTERNS: &[&str] = &[
-    "**/*.rs",    // Rustファイル
-    "**/*.go",    // Goファイル
-    "**/*.js",    // JavaScriptファイル
-    "**/*.ts",    // TypeScriptファイル
-    "**/*.py",    // Pythonファイル
-    "**/*.java",  // Javaファイル
-    "**/*.cpp",   // C++ファイル
-    "**/*.hpp",   // C++ヘッダー
-    "**/*.c",     // Cファイル
-    "**/*.h",     // Cヘッダー
+    "**/*.rs",   // Rustファイル
+    "**/*.go",   // Goファイル
+    "**/*.js",   // JavaScriptファイル
+    "**/*.ts",   // TypeScriptファイル
+    "**/*.py",   // Pythonファイル
+    "**/*.java", // Javaファイル
+    "**/*.cpp",  // C++ファイル
+    "**/*.hpp",  // C++ヘッダー
+    "**/*.c",    // Cファイル
+    "**/*.h",    // Cヘッダー
 ];
 
 /// デフォルトの除外パターン
 const DEFAULT_EXCLUDE_PATTERNS: &[&str] = &[
-    "**/target/**/*",      // Rustのビルドディレクトリ
+    "**/target/**/*",       // Rustのビルドディレクトリ
     "**/node_modules/**/*", // Node.jsの依存関係
-    "**/dist/**/*",        // ビルド成果物
-    "**/build/**/*",       // ビルドディレクトリ
-    "**/.git/**/*",        // Gitディレクトリ
-    "**/vendor/**/*",      // 依存関係
-    "**/*.min.*",          // minifyされたファイル
-    "**/test/**/*",        // テストディレクトリ
-    "**/tests/**/*",       // テストディレクトリ
-    "test/**/*",        // テストディレクトリ
-    "tests/**/*",       // テストディレクトリ
+    "**/dist/**/*",         // ビルド成果物
+    "**/build/**/*",        // ビルドディレクトリ
+    "**/.git/**/*",         // Gitディレクトリ
+    "**/vendor/**/*",       // 依存関係
+    "**/*.min.*",           // minifyされたファイル
+    "**/test/**/*",         // テストディレクトリ
+    "**/tests/**/*",        // テストディレクトリ
+    "test/**/*",            // テストディレクトリ
+    "tests/**/*",           // テストディレクトリ
 ];
 
 #[derive(Parser)]
@@ -81,54 +81,57 @@ struct Cli {
 impl Cli {
     fn get_include_patterns(&self) -> Vec<String> {
         let mut patterns = Vec::new();
-        
+
         if !self.no_default_includes {
             patterns.extend(DEFAULT_INCLUDE_PATTERNS.iter().map(|s| s.to_string()));
         }
-        
+
         if let Some(ref user_patterns) = self.include_patterns {
             patterns.extend(user_patterns.clone());
         }
-        
+
         patterns
     }
 
     fn get_exclude_patterns(&self) -> Vec<String> {
         let mut patterns = Vec::new();
-        
+
         if !self.no_default_excludes {
             patterns.extend(DEFAULT_EXCLUDE_PATTERNS.iter().map(|s| s.to_string()));
         }
-        
+
         if let Some(ref user_patterns) = self.exclude_patterns {
             patterns.extend(user_patterns.clone());
         }
-        
+
         patterns
     }
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    
+
     let analyzer = HotspotAnalyzer::new(
         &cli.repo,
         cli.time_window,
         cli.get_include_patterns(),
         cli.get_exclude_patterns(),
         cli.include_merges,
-    ).context("Failed to initialize analyzer")?;
+    )
+    .context("Failed to initialize analyzer")?;
 
-    let mut hotspots = analyzer.analyze()
-        .context("Failed to analyze repository")?;
-    
+    let mut hotspots = analyzer.analyze().context("Failed to analyze repository")?;
+
     hotspots.sort_by(|a, b| b.hotspot_score.partial_cmp(&a.hotspot_score).unwrap());
     let top_hotspots: Vec<_> = hotspots.into_iter().take(cli.top).collect();
 
     match cli.format.as_str() {
         "json" => {
-            println!("{}", serde_json::to_string_pretty(&top_hotspots)
-                .context("Failed to serialize to JSON")?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&top_hotspots)
+                    .context("Failed to serialize to JSON")?
+            );
         }
         "csv" => {
             let mut wtr = csv::Writer::from_writer(std::io::stdout());

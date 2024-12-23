@@ -33,27 +33,27 @@ Options:
 
 ## Examples
 
-# デフォルトのパターンを使用
+### デフォルトのパターンを使用
 ```bash
 cargo run -- -r ./repo
 ```
 
-# デフォルトに加えて追加のパターンを指定
+### デフォルトに加えて追加のパターンを指定
 ```bash
 cargo run -- -r ./repo -i "**/*.sql" -e "**/migrations/*"
 ```
 
-# デフォルトを無効化して独自のパターンのみを使用
+### デフォルトを無効化して独自のパターンのみを使用
 ```bash
 cargo run -- -r ./repo --no-default-includes -i "src/**/*.rs"
 ```
 
-# デフォルトの除外を無効化
+### デフォルトの除外を無効化
 ```bash
 cargo run -- -r ./repo --no-default-excludes
 ```
 
-# 全てのデフォルトを無効化して完全にカスタム設定
+### 全てのデフォルトを無効化して完全にカスタム設定
 ```bash
 cargo run -- -r ./repo --no-default-includes --no-default-excludes -i "src/**/*.rs" -e "src/generated/*"
 ```
