@@ -1,0 +1,59 @@
+name: Delete Release and Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '削除するバージョン番号 (例: v1.2.3)'
+        required: true
+        type: string
+        pattern: '^v\d+\.\d+\.\d+$'
+
+jobs:
+  delete-release-and-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version format
+        run: |
+          if [[ ! ${{ github.event.inputs.version }} =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "エラー: バージョン番号は 'v1.2.3' の形式で入力してください"
+            exit 1
+          fi
+
+      - name: Check if tag exists
+        run: |
+          git fetch --tags
+          if ! git rev-parse "${{ github.event.inputs.version }}" >/dev/null 2>&1; then
+            echo "エラー: バージョン ${{ github.event.inputs.version }} が存在しません"
+            exit 1
+          fi
+
+      - name: Delete GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.version }}
+        run: |
+          # リリースIDを取得
+          release_id=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
+            | jq -r '.id')
+          
+          if [ "$release_id" != "null" ]; then
+            # リリースを削除
+            curl -X DELETE -H "Authorization: token $GITHUB_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/$release_id"
+            echo "リリース $TAG を削除しました"
+          else
+            echo "リリース $TAG は見つかりませんでした"
+          fi
+
+      - name: Delete Tag
+        run: |
+          git push origin --delete ${{ github.event.inputs.version }}
+          echo "タグ ${{ github.event.inputs.version }} を削除しました" 
