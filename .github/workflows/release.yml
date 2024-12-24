@@ -62,14 +62,14 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact_name: hotspot
-            asset_name: hotspot-linux-amd64
+            artifact_name: hotspot-analyzer
+            asset_name: hotspot-analyzer-linux-amd64
           - os: windows-latest
-            artifact_name: hotspot.exe
-            asset_name: hotspot-windows-amd64.exe
+            artifact_name: hotspot-analyzer.exe
+            asset_name: hotspot-analyzer-windows-amd64.exe  
           - os: macos-latest
-            artifact_name: hotspot
-            asset_name: hotspot-macos-amd64
+            artifact_name: hotspot-analyzer
+            asset_name: hotspot-analyzer-macos-amd64
 
     steps:
     - uses: actions/checkout@v4
@@ -84,11 +84,11 @@ jobs:
       shell: bash
       run: |
         if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          7z a ${{ matrix.asset_name }}.zip "./target/release/${{ matrix.artifact_name }}"
+          7z a ${{ matrix.asset_name }}.zip "/target/release/${{ matrix.artifact_name }}"
           sha256sum ${{ matrix.asset_name }}.zip > ${{ matrix.asset_name }}.zip.sha256
         else
           mkdir -p dist
-          cp "./target/release/${{ matrix.artifact_name }}" "./dist/"
+          cp "/target/release/${{ matrix.artifact_name }}" "./dist/"
           tar czf ${{ matrix.asset_name }}.tar.gz -C dist .
           rm -rf dist
           sha256sum ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
