@@ -189,31 +189,31 @@ impl GitRepository {
 }
 
 fn glob_to_regex(pattern: &str) -> String {
-    let mut regex = String::new();
+    let mut regex = String::with_capacity(pattern.len() * 2);
     regex.push('^');
 
     let mut chars = pattern.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
             '*' => {
-                if chars.peek() == Some(&'*') {
-                    chars.next(); // 2つ目の'*'を消費
-                                  // **の後のスラッシュをチェック
-                    if chars.peek() == Some(&'/') {
-                        chars.next(); // '/'を消費
-                        regex.push_str(".*/"); // ディレクトリをまたぐ���ッチング
+                let is_double_star = chars.peek() == Some(&'*');
+                if is_double_star {
+                    chars.next(); // Skip second '*'
+                    regex.push_str(if chars.peek() == Some(&'/') {
+                        chars.next();
+                        ".*/"
                     } else {
-                        regex.push_str(".*"); // スラッシュがない場合は単純に.*
-                    }
+                        ".*"
+                    });
                 } else {
-                    regex.push_str("[^/]*"); // 単一の*は現在のディレクトリ内のみマッチ
+                    regex.push_str("[^/]*");
                 }
             }
             '?' => regex.push('.'),
             '.' => regex.push_str("\\."),
             '/' => regex.push('/'),
             c if c.is_alphanumeric() => regex.push(c),
-            _ => regex.push_str(&regex::escape(&c.to_string())),
+            c => regex.push_str(&regex::escape(&c.to_string())),
         }
     }
 
@@ -224,6 +224,7 @@ fn glob_to_regex(pattern: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_glob_to_regex() {
@@ -263,5 +264,135 @@ mod tests {
         assert!(git_repo.should_include_file("src/config.toml"));
         assert!(!git_repo.should_include_file("src/main.py"));
         assert!(!git_repo.should_include_file("target/debug/main.rs"));
+    }
+
+    #[test]
+    fn test_git_repository_open_invalid_path() {
+        let result = GitRepository::open("non_existent_path", vec![], vec![], false);
+        assert!(result.is_err());
+        match result {
+            Err(AnalyzerError::GitError(_)) => (),
+            _ => panic!("Expected GitError"),
+        }
+    }
+
+    #[test]
+    fn test_glob_to_regex_special_cases() {
+        let test_cases = [
+            // 特殊文字を含むパターン
+            ("doc/(a|b).md", "^doc/\\(a\\|b\\)\\.md$"),
+            // 複数のワイルドカードパターン
+            ("**/*.min.*", "^.*/[^/]*\\.min\\.[^/]*$"),
+            // ドット付きパターン
+            (".gitignore", "^\\.gitignore$"),
+            ("*.config.js", "^[^/]*\\.config\\.js$"),
+            // 複雑なネストパターン
+            (
+                "src/**/test/**/*.spec.js",
+                "^src/.*/test/.*/[^/]*\\.spec\\.js$",
+            ),
+        ];
+
+        for (input, expected) in test_cases {
+            let result = glob_to_regex(input);
+            assert_eq!(
+                result, expected,
+                "Pattern '{}' should convert to '{}', but got '{}'",
+                input, expected, result
+            );
+
+            // 生成された正規表現が有効であることを確認
+            assert!(
+                Regex::new(&result).is_ok(),
+                "Generated regex '{}' is invalid",
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_should_include_file_edge_cases() {
+        let repo = Repository::open(".").unwrap();
+        let git_repo = GitRepository {
+            repo,
+            include_patterns: vec![
+                Regex::new("^.*\\.(rs|toml)$").unwrap(),
+                Regex::new("^src/.*$").unwrap(),
+            ],
+            exclude_patterns: vec![
+                Regex::new("^target/.*$").unwrap(),
+                Regex::new("^.*\\.generated\\..*$").unwrap(),
+            ],
+            include_merge_commits: false,
+        };
+
+        // 境界ケースのテスト
+        assert!(git_repo.should_include_file("src/")); // ディレクトリパス
+        assert!(git_repo.should_include_file("src/module/file.rs")); // ネストされたパス
+        assert!(git_repo.should_include_file("config.toml")); // ルートのtomlファイル
+        assert!(!git_repo.should_include_file("")); // 空のパス
+        assert!(!git_repo.should_include_file("target/debug/file.rs")); // 除外ディレクトリ
+    }
+
+    #[test]
+    fn test_git_repository_with_empty_patterns() {
+        let repo = Repository::open(".").unwrap();
+        let git_repo = GitRepository {
+            repo,
+            include_patterns: vec![],
+            exclude_patterns: vec![],
+            include_merge_commits: false,
+        };
+
+        // 空のパターンの場合、全てのファイルが含まれる
+        assert!(git_repo.should_include_file("any_file.txt"));
+        assert!(git_repo.should_include_file("src/main.rs"));
+        assert!(git_repo.should_include_file("deeply/nested/path/file.js"));
+    }
+
+    // テンポラリリポジトリを使用したテスト用ヘルパー関数
+    fn setup_test_repo() -> Result<(TempDir, Repository), git2::Error> {
+        let temp_dir = TempDir::new().unwrap();
+        let repo = Repository::init(temp_dir.path())?;
+
+        // テスト用の初期コミットを作成
+        let signature = git2::Signature::now("test", "test@example.com")?;
+        {
+            let tree_id = {
+                let mut index = repo.index()?;
+                index.write_tree()?
+            };
+            let tree = repo.find_tree(tree_id)?;
+            repo.commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                "Initial commit",
+                &tree,
+                &[],
+            )?;
+        }
+
+        Ok((temp_dir, repo))
+    }
+
+    #[test]
+    fn test_git_repository_with_empty_repo() -> Result<(), Box<dyn std::error::Error>> {
+        let (_temp_dir, _repo) = setup_test_repo()?;
+        
+        // 空のリポジトリでの動作確認
+        let git_repo = GitRepository::open(
+            _temp_dir.path(),
+            vec!["*.rs".to_string()],
+            vec![],
+            false,
+        )?;
+
+        let since = Utc::now() - chrono::Duration::days(1);
+        let commits = git_repo.get_commits_since(since)?;
+        
+        // 新しいリポジトリなので、コミットは初期コミットのみ
+        assert!(commits.is_empty());
+        Ok(())
     }
 }
