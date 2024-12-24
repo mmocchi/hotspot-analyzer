@@ -1,7 +1,7 @@
 [package]
-authors = ["Your Name <your.email@example.com>"]
+authors = ["mmocchi <mottyzzz@gmail.com>"]
 categories = ["development-tools", "command-line-utilities"]
-description = "A Git repository analyzer that identifies code hotspots using Adam Tornhill's method"
+description = "A Git repository analyzer that identifies code hotspots"
 edition = "2021"
 keywords = ["git", "analysis", "hotspot", "code-quality"]
 license = "MIT"

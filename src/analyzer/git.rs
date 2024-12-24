@@ -1,9 +1,22 @@
+//! Gitリポジトリとの対話を担当するモジュール
+//!
+//! このモジュールは、libgit2を使用してGitリポジトリからコミット履歴を取得し、
+//! ファイルの変更履歴を追跡するための機能を提供します。
+
 use super::error::AnalyzerError;
 use chrono::{DateTime, Utc};
 use git2::{Commit, Repository};
 use regex::Regex;
 use std::path::Path;
 
+/// Gitリポジトリへのアクセスを管理する構造体
+///
+/// # フィールド
+///
+/// - `repo`: libgit2のリポジトリハンドル
+/// - `include_patterns`: 分析対象とするファイルパターン
+/// - `exclude_patterns`: 分析から除外するファイルパターン
+/// - `include_merge_commits`: マージコミットを含めるかどうかのフラグ
 pub struct GitRepository {
     repo: Repository,
     include_patterns: Vec<Regex>,
@@ -11,6 +24,13 @@ pub struct GitRepository {
     include_merge_commits: bool,
 }
 
+/// コミット情報を保持する構造体
+///
+/// # フィールド
+///
+/// - `author`: コミット作成者の名前
+/// - `files`: コミットで変更されたファイルのリスト
+/// - `timestamp`: コミットのタイムスタンプ（分析時の時間フィルタリングに使用）
 #[derive(Debug)]
 pub struct CommitInfo {
     pub author: String,
@@ -18,6 +38,20 @@ pub struct CommitInfo {
 }
 
 impl GitRepository {
+    /// 指定されたパスのGitリポジトリをオープンします
+    ///
+    /// # 引数
+    ///
+    /// - `path`: Gitリポジトリのパス
+    /// - `include_patterns`: 分析対象とするファイルパターン
+    /// - `exclude_patterns`: 分析から除外するファイルパターン
+    /// - `include_merge_commits`: マージコミットを含めるかどうか
+    ///
+    /// # エラー
+    ///
+    /// 以下の場合にエラーを返します：
+    /// - リポジトリのオープンに失敗
+    /// - パターンの正規表現への変換に失敗
     pub fn open(
         path: impl AsRef<Path>,
         include_patterns: Vec<String>,
@@ -46,6 +80,15 @@ impl GitRepository {
         })
     }
 
+    /// 指定されたファイルパスが分析対象に含まれるかどうかを判定します
+    ///
+    /// # 引数
+    ///
+    /// - `file_path`: 判定対象のファイルパス
+    ///
+    /// # 戻り値
+    ///
+    /// ファイルが分析対象に含まれる場合は`true`、それ以外は`false`
     fn should_include_file(&self, file_path: &str) -> bool {
         if self
             .exclude_patterns
@@ -64,6 +107,21 @@ impl GitRepository {
             .any(|pattern| pattern.is_match(file_path))
     }
 
+    /// 指定された日時以降のコミット情報を取得します
+    ///
+    /// # 引数
+    ///
+    /// - `since`: この日時以降のコミットを取得
+    ///
+    /// # 戻り値
+    ///
+    /// コミット情報のベクターを返します
+    ///
+    /// # エラー
+    ///
+    /// 以下の場合にエラーを返します：
+    /// - コミット履歴の取得に失敗
+    /// - コミット情報の解析に失敗
     pub fn get_commits_since(
         &self,
         since: DateTime<Utc>,
@@ -72,17 +130,22 @@ impl GitRepository {
         revwalk.push_head()?;
         revwalk.set_sorting(git2::Sort::TIME)?;
 
-        let since_timestamp = since.timestamp();
-
         let mut commits = Vec::new();
         for oid in revwalk {
             let oid = oid?;
             let commit = self.repo.find_commit(oid)?;
 
-            if commit.time().seconds() < since_timestamp {
+            let commit_time =
+                DateTime::from_timestamp(commit.time().seconds(), 0).ok_or_else(|| {
+                    AnalyzerError::AnalysisError("Invalid commit timestamp".to_string())
+                })?;
+
+            // 指定された日時より前のコミットはスキップ
+            if commit_time < since {
                 continue;
             }
 
+            // マージコミットを除外
             if !self.include_merge_commits && commit.parent_count() > 1 {
                 continue;
             }
@@ -95,6 +158,7 @@ impl GitRepository {
                 .filter(|file_path| self.should_include_file(file_path))
                 .collect();
 
+            // 変更されたファイルがある場合はコミット情報を追加
             if !files.is_empty() {
                 commits.push(CommitInfo { author, files });
             }
@@ -137,7 +201,7 @@ fn glob_to_regex(pattern: &str) -> String {
                                   // **の後のスラッシュをチェック
                     if chars.peek() == Some(&'/') {
                         chars.next(); // '/'を消費
-                        regex.push_str(".*/"); // ディレクトリをまたぐマッチング
+                        regex.push_str(".*/"); // ディレクトリをまたぐ���ッチング
                     } else {
                         regex.push_str(".*"); // スラッシュがない場合は単純に.*
                     }
