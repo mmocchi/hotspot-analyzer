@@ -379,18 +379,14 @@ mod tests {
     #[test]
     fn test_git_repository_with_empty_repo() -> Result<(), Box<dyn std::error::Error>> {
         let (_temp_dir, _repo) = setup_test_repo()?;
-        
+
         // 空のリポジトリでの動作確認
-        let git_repo = GitRepository::open(
-            _temp_dir.path(),
-            vec!["*.rs".to_string()],
-            vec![],
-            false,
-        )?;
+        let git_repo =
+            GitRepository::open(_temp_dir.path(), vec!["*.rs".to_string()], vec![], false)?;
 
         let since = Utc::now() - chrono::Duration::days(1);
         let commits = git_repo.get_commits_since(since)?;
-        
+
         // 新しいリポジトリなので、コミットは初期コミットのみ
         assert!(commits.is_empty());
         Ok(())
