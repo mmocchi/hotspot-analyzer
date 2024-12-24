@@ -156,7 +156,11 @@ impl FileStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use git2::{Repository, Signature};
     use std::collections::HashMap;
+    use std::fs;
+    use std::path::Path;
+    use tempfile::TempDir;
 
     #[test]
     fn test_file_stats_into_metrics() {
@@ -199,5 +203,254 @@ mod tests {
         assert_eq!(metrics.main_contributor_percentage, 0.0);
         assert_eq!(metrics.knowledge_distribution, 0.0);
         assert_eq!(metrics.hotspot_score, 0.0);
+    }
+
+    // ヘルパー関数も修正
+    fn create_test_repo() -> Result<(TempDir, Repository), git2::Error> {
+        let temp_dir = TempDir::new().unwrap();
+        let repo = Repository::init(temp_dir.path())?;
+        let signature = Signature::now("test", "test@example.com")?;
+
+        // test.rsファイルを作成
+        fs::write(
+            temp_dir.path().join("test.rs"),
+            "fn main() { println!(\"Hello\"); }",
+        )
+        .unwrap();
+
+        // ファイルをステージングに追加
+        {
+            let mut index = repo.index()?;
+            index.add_path(Path::new("test.rs"))?;
+            index.write()?;
+
+            let tree_id = index.write_tree()?;
+            let tree = repo.find_tree(tree_id)?;
+
+            // 初期コミットを作成（親コミットなし）
+            repo.commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                "Initial commit",
+                &tree,
+                &[],
+            )?;
+
+            // コミットが正しく作成されたか確認
+            let head = repo.head()?;
+
+            assert!(head.is_branch());
+            let commit = head.peel_to_commit()?;
+
+            assert_eq!(commit.parents().len(), 0);
+        }
+        Ok((temp_dir, repo))
+    }
+
+    #[test]
+    fn test_analyzer_initialization() -> Result<(), Box<dyn std::error::Error>> {
+        let (temp_dir, _) = create_test_repo()?;
+
+        // 正常な初期化
+        let analyzer = HotspotAnalyzer::new(
+            temp_dir.path(),
+            30,
+            vec!["**/*.rs".to_string()],
+            vec!["**/target/**".to_string()],
+            false,
+        );
+        assert!(analyzer.is_ok());
+
+        // 無効なパスでの初期化
+        let invalid_analyzer = HotspotAnalyzer::new("non_existent_path", 30, vec![], vec![], false);
+        assert!(invalid_analyzer.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_analyze_empty_repo() -> Result<(), Box<dyn std::error::Error>> {
+        let (temp_dir, _) = create_test_repo()?;
+
+        let analyzer = HotspotAnalyzer::new(
+            temp_dir.path(),
+            30,
+            vec!["**/*.txt".to_string()],
+            vec![],
+            false,
+        )?;
+
+        let result = analyzer.analyze()?;
+        // 新規リポジトリのため、結果は空か最小限のはず
+        assert!(result.is_empty());
+
+        if let Some(metrics) = result.first() {
+            assert_eq!(metrics.revisions, 1); // 初期コミットのみ
+            assert_eq!(metrics.author_count, 1); // 単一の作者
+            assert_eq!(metrics.main_contributor_percentage, 100.0); // 100%単一作者
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_analyze_single_commits() -> Result<(), Box<dyn std::error::Error>> {
+        let (temp_dir, _) = create_test_repo()?;
+
+        let analyzer =
+            HotspotAnalyzer::new(temp_dir.path(), 30, vec!["*.rs".to_string()], vec![], false)?;
+
+        let result = analyzer.analyze()?;
+        assert!(result.len() == 1);
+
+        if let Some(metrics) = result.first() {
+            assert_eq!(metrics.revisions, 1); // 初期コミットのみ
+            assert_eq!(metrics.author_count, 1); // 単一の作者
+            assert_eq!(metrics.main_contributor_percentage, 100.0); // 100%単一作者
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_analyze_with_multiple_commits() -> Result<(), Box<dyn std::error::Error>> {
+        let (temp_dir, repo) = create_test_repo()?;
+        let signature = Signature::now("test2", "test2@example.com")?;
+
+        // 2人目の開発者による変更を追加
+        fs::write(
+            temp_dir.path().join("test.rs"),
+            "fn main() { println!(\"Hello, World!\"); }",
+        )
+        .unwrap();
+
+        let mut index = repo.index()?;
+        index.add_path(Path::new("test.rs"))?;
+        index.write()?;
+        let tree_id = index.write_tree()?;
+        let tree = repo.find_tree(tree_id)?;
+        let parent = repo.head()?.peel_to_commit()?;
+        repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "Second commit",
+            &tree,
+            &[&parent],
+        )?;
+
+        let analyzer =
+            HotspotAnalyzer::new(temp_dir.path(), 30, vec!["*.rs".to_string()], vec![], false)?;
+
+        let result = analyzer.analyze()?;
+        assert_eq!(result.len(), 1);
+
+        let metrics = &result[0];
+        assert_eq!(metrics.revisions, 2); // 2回のコミット
+        assert_eq!(metrics.author_count, 2); // 2人の作者
+        assert!(metrics.main_contributor_percentage <= 100.0);
+        assert!(metrics.main_contributor_percentage >= 50.0);
+        assert!(metrics.knowledge_distribution > 0.0);
+        assert!(metrics.hotspot_score > 0.0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_file_stats_metrics_calculation() {
+        let mut stats = FileStats::default();
+
+        // 複数の開発者のコミットを追加
+        stats.revisions = 10;
+        stats.authors.insert("dev1".to_string());
+        stats.authors.insert("dev2".to_string());
+        stats.authors.insert("dev3".to_string());
+
+        stats.author_commits.insert("dev1".to_string(), 5);
+        stats.author_commits.insert("dev2".to_string(), 3);
+        stats.author_commits.insert("dev3".to_string(), 2);
+
+        let metrics = stats.into_metrics("test_file.rs".to_string());
+
+        assert_eq!(metrics.path, "test_file.rs");
+        assert_eq!(metrics.revisions, 10);
+        assert_eq!(metrics.author_count, 3);
+
+        // メインコントリビューターの割合は50%
+        assert!((metrics.main_contributor_percentage - 50.0).abs() < 0.001);
+
+        // 知識分布は0.5 (1.0 - 0.5)
+        assert!((metrics.knowledge_distribution - 0.5).abs() < 0.001);
+
+        // 複雑性係数は sqrt(3)
+        let complexity_factor = (3.0_f64).sqrt();
+        let expected_score = 10.0 * complexity_factor * 0.5;
+        assert!((metrics.hotspot_score - expected_score).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_analyze_with_exclusions() -> Result<(), Box<dyn std::error::Error>> {
+        let (temp_dir, _) = create_test_repo()?;
+
+        // 除外パターンに一致するファイルを追加
+        fs::write(
+            temp_dir.path().join("test.generated.rs"),
+            "// Generated code",
+        )
+        .unwrap();
+
+        let analyzer = HotspotAnalyzer::new(
+            temp_dir.path(),
+            30,
+            vec!["*.rs".to_string()],
+            vec!["**/*.generated.rs".to_string()],
+            false,
+        )?;
+
+        let result = analyzer.analyze()?;
+
+        assert!(result.len() == 1);
+
+        // 生成されたファイルは除外されているはず
+        for metrics in &result {
+            assert!(!metrics.path.contains(".generated.rs"));
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_file_stats_edge_cases() {
+        // 空の統計
+        let empty_stats = FileStats::default();
+        let metrics = empty_stats.into_metrics("empty.rs".to_string());
+        assert_eq!(metrics.hotspot_score, 0.0);
+        assert_eq!(metrics.knowledge_distribution, 0.0);
+        assert_eq!(metrics.main_contributor_percentage, 0.0);
+
+        // 単一の開発者
+        let mut single_author_stats = FileStats::default();
+        single_author_stats.revisions = 1;
+        single_author_stats.authors.insert("dev1".to_string());
+        single_author_stats
+            .author_commits
+            .insert("dev1".to_string(), 1);
+
+        let metrics = single_author_stats.into_metrics("single.rs".to_string());
+        assert_eq!(metrics.main_contributor_percentage, 100.0);
+        assert_eq!(metrics.knowledge_distribution, 0.0);
+
+        // 同等の貢献度
+        let mut equal_stats = FileStats::default();
+        equal_stats.revisions = 4;
+        equal_stats.authors.insert("dev1".to_string());
+        equal_stats.authors.insert("dev2".to_string());
+        equal_stats.author_commits.insert("dev1".to_string(), 2);
+        equal_stats.author_commits.insert("dev2".to_string(), 2);
+
+        let metrics = equal_stats.into_metrics("equal.rs".to_string());
+        assert_eq!(metrics.main_contributor_percentage, 50.0);
+        assert_eq!(metrics.knowledge_distribution, 0.5);
     }
 }
