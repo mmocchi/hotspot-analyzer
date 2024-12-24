@@ -84,10 +84,13 @@ jobs:
       shell: bash
       run: |
         if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          7z a ${{ matrix.asset_name }}.zip ./target/release/${{ matrix.artifact_name }}
+          7z a ${{ matrix.asset_name }}.zip "./target/release/${{ matrix.artifact_name }}"
           sha256sum ${{ matrix.asset_name }}.zip > ${{ matrix.asset_name }}.zip.sha256
         else
-          tar czf ${{ matrix.asset_name }}.tar.gz -C target/release ${{ matrix.artifact_name }}
+          mkdir -p dist
+          cp "./target/release/${{ matrix.artifact_name }}" "./dist/"
+          tar czf ${{ matrix.asset_name }}.tar.gz -C dist .
+          rm -rf dist
           sha256sum ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
         fi
         
