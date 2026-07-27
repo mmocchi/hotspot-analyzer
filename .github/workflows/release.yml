@@ -17,7 +17,7 @@ jobs:
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           
@@ -72,7 +72,7 @@ jobs:
             asset_name: hotspot-analyzer-macos-amd64
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
